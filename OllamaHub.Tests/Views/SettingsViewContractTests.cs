@@ -27,30 +27,67 @@ public sealed class SettingsViewContractTests
     }
 
     [Fact]
-    public void AppearancePipelineSupportsZeroOpacity()
+    public void AppearancePipelineUsesAContinuousZeroToHundredOpacityRange()
     {
         var windowSource = ReadDesktopFile("MainWindow.axaml.cs");
         var servicePath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "OllamaHub", "Configuration", "ConfigurationManagementService.cs");
         var serviceSource = File.ReadAllText(servicePath);
 
         Assert.Contains("Math.Clamp(opacity, 0, 100)", windowSource, StringComparison.Ordinal);
-        Assert.Contains("Math.Clamp(Math.Round(baseAlpha * (opacity / 86d) * blurFactor), 0, 255)", windowSource, StringComparison.Ordinal);
         Assert.Contains("TransparencyOpacity is < 0 or > 100", serviceSource, StringComparison.Ordinal);
+
+        var tint = MainWindow.CalculateBlurTintFactor(24);
+        var alphaAtZero = MainWindow.CalculateBrushAlpha(230, 0, tint);
+        var alphaAtOne = MainWindow.CalculateBrushAlpha(230, 1, tint);
+        var alphaAtFour = MainWindow.CalculateBrushAlpha(230, 4, tint);
+        var alphaAtHundred = MainWindow.CalculateBrushAlpha(230, 100, tint);
+
+        Assert.True(alphaAtZero > 0);
+        Assert.True(alphaAtOne > alphaAtZero);
+        Assert.True(alphaAtFour > alphaAtOne);
+        Assert.True(alphaAtHundred > alphaAtFour);
+        Assert.Equal(0.16, MainWindow.CalculateOpacityFactor(0), 3);
+        Assert.Equal(1, MainWindow.CalculateOpacityFactor(100), 3);
     }
 
     [Fact]
-    public void AppearancePipelineKeepsTransparentFallbackAndDoesNotDisableItAtRuntime()
+    public void TransparencyOpacityZeroKeepsAVisibleBaselineWithoutAJumpAtLowValues()
+    {
+        var tint = MainWindow.CalculateBlurTintFactor(24);
+        var alphaAtZero = MainWindow.CalculateBrushAlpha(230, 0, tint);
+        var alphaAtFour = MainWindow.CalculateBrushAlpha(230, 4, tint);
+
+        Assert.InRange(alphaAtZero, 1, 255);
+        Assert.InRange(alphaAtFour - alphaAtZero, 0, 12);
+    }
+
+    [Fact]
+    public void AppearancePipelineKeepsMaterialBeforeTransparentFallback()
     {
         var windowSource = ReadDesktopFile("MainWindow.axaml.cs");
 
         Assert.Contains("WindowTransparencyLevel.Transparent", windowSource, StringComparison.Ordinal);
-        Assert.Contains("TransparencyLevelHint = BuildTransparencyLevels(algorithm, opacity);", windowSource, StringComparison.Ordinal);
+        Assert.Contains("TransparencyLevelHint = BuildTransparencyLevels(algorithm);", windowSource, StringComparison.Ordinal);
         Assert.Contains("[WindowTransparencyLevel.Mica, WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Blur, WindowTransparencyLevel.Transparent]", windowSource, StringComparison.Ordinal);
         Assert.Contains("[WindowTransparencyLevel.Blur, WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Transparent]", windowSource, StringComparison.Ordinal);
         Assert.Contains("[WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Blur, WindowTransparencyLevel.Transparent]", windowSource, StringComparison.Ordinal);
-        Assert.Contains("0.35 + (blurAmount / 64d * 0.65)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("0.35 + (Math.Clamp(blurAmount, 0, 64) / 64d * 0.65)", windowSource, StringComparison.Ordinal);
         Assert.DoesNotContain("TransparencyLevelHint = !enabled", windowSource, StringComparison.Ordinal);
         Assert.DoesNotContain("[WindowTransparencyLevel.None]", windowSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BlurTintChangesSmoothlyWithoutChangingTheOpacityScale()
+    {
+        var lowBlur = MainWindow.CalculateBlurTintFactor(0);
+        var highBlur = MainWindow.CalculateBlurTintFactor(64);
+
+        Assert.Equal(0.35, lowBlur, 3);
+        Assert.Equal(1, highBlur, 3);
+        Assert.True(highBlur > lowBlur);
+        Assert.True(
+            MainWindow.CalculateBrushAlpha(230, 86, highBlur)
+            > MainWindow.CalculateBrushAlpha(230, 86, lowBlur));
     }
 
     [Fact]
@@ -97,9 +134,6 @@ public sealed class SettingsViewContractTests
                 WindowTransparencyLevel.Transparent
             },
             MainWindow.BuildTransparencyLevels("mica"));
-        Assert.Equal(
-            new[] { WindowTransparencyLevel.Transparent },
-            MainWindow.BuildTransparencyLevels("mica", 0));
     }
 
     [Fact]
